@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# test git
+# test branch
 import argparse
 from train import train
 from test import test
