@@ -4,24 +4,25 @@ from matplotlib import pyplot as plt
 from einops import rearrange
 
 '''
-32 channels 
+32 channels
 '''
 
 
 class Electrodes:
     def __init__(self):
-        # X, Y, Z coordinates of the electrodes (32 * 3)
-        self.positions_3d = np.array([[-27, 83, -3], [-36, 76, 24], [-71, 51, -3], [-48, 59, 44],
-                                      [-33, 33, 74], [-78, 30, 27], [-87, 0, -3], [-63, 0, 61],
-                                      [-33, -33, 74], [-78, -30, 27], [-71, -51, -3], [-48, -59, 44],
-                                      [0, -63, 61], [-36, -76, 24], [-27, -83, -3], [0, -87, -3],
-                                      [27, -83, -3], [36, -76, 24], [48, -59, 44], [71, -51, -3],
-                                      [78, -30, 27], [33, -33, 74], [63, 0, 61], [87, 0, -3],
-                                      [78, 30, 27], [33, 33, 74], [48, 59, 44], [71, 51, -3],
-                                      [36, 76, 24], [27, 83, -3], [0, 63, 61], [0, 0, 88]])
-        self.channel_names = np.array(['Fp1', 'AF3', 'F7', 'F3', 'FC1', 'FC5', 'T7', 'C3', 'CP1', 'CP5', 'P7',
-                                       'P3', 'Pz', 'PO3', 'O1', 'Oz', 'O2', 'PO4', 'P4', 'P8', 'CP6', 'CP2',
-                                       'C4', 'T8', 'FC6', 'FC2', 'F4', 'F8', 'AF4', 'Fp2', 'Fz', 'Cz'])
+        # X, Y, Z coordinates of the electrodes
+        self.positions_3d = np.array(
+            [[0.95, 0.309, -0.0349], [0.885, 0.376, 0.276], [0.673, 0.545, 0.5], [0.587, 0.809, -0.0349],
+             [0.339, 0.883, 0.326], [0.375, 0.375, 0.848], [0, 0.719, 0.695], [0, 0.999, -0.0349],
+             [-0.339, 0.883, 0.326], [-0.375, 0.375, 0.848], [-0.673, 0.545, 0.5], [-0.587, 0.809, -0.0349],
+             [-0.885, 0.376, 0.276], [-0.95, 0.309, -0.0349], [-0.999, 0, -0.0349], [-0.719, 0, 0.695],
+             [0.95, -0.309, -0.0349], [0.885, -0.376, 0.276], [0.719, 0, 0.695], [0.673, -0.545, 0.5],
+             [0.587, -0.809, -0.0349], [0.339, -0.883, 0.326], [0.375, -0.375, 0.848], [0, 0, 1],
+             [0, -0.719, 0.695], [0, -0.999, -0.0349], [-0.339, -0.883, 0.326], [-0.375, -0.375, 0.848],
+             [-0.673, -0.545, 0.5], [-0.587, -0.809, -0.0349], [-0.885, -0.376, 0.276], [-0.95, -0.309, -0.0349]])
+        self.channel_names = np.array(['Fp1', 'AF3', 'F3', 'F7', 'FC5', 'FC1', 'C3', 'T7', 'CP5', 'CP1', 'P3',
+                                       'P7', 'PO3', 'O1', 'Oz', 'Pz', 'Fp2', 'AF4', 'Fz', 'F4', 'F8', 'FC6',
+                                       'FC2', 'Cz', 'C4', 'T8', 'CP6', 'CP2', 'P4', 'P8', 'PO4', 'O2'])
         # Global connections will get a weight of -1 in the adj matrix
         self.global_connections = np.array(
             [['Fp1', 'Fp2'], ['AF3', 'AF4'], ['F3', 'F4'], ['FC5', 'FC6'], ['T7', 'T8'], ['CP5', 'CP6'], ['P3', 'P4'],
@@ -67,7 +68,6 @@ class Electrodes:
 
     # Distance using 3d positions
     def get_3d_distance(self, name1, name2):
-        # print(1)
         index1, index2 = np.where(self.channel_names == name1)[0][0], np.where(self.channel_names == name2)[0][0]
         p1, p2 = self.positions_3d[index1], self.positions_3d[index2]
         incX, incY, incZ = p1[0] - p2[0], p1[1] - p2[1], p1[2] - p2[2]
@@ -76,9 +76,9 @@ class Electrodes:
     # get_adjacency_matrix is the main method for the Electrodes class. It returns a fixed adjacency matrix for the graph based on the 3-d coordinates of the electrodes
     # Symetrical, contains self-loops (learnable [?])
     # Calibration constant should keep 20% of the links acording to the paper
-    def get_adjacency_matrix(self, calibration_constant=6, active_threshold=0.1, add_global_connections=False):
-        print('1')
+    def get_adjacency_matrix(self, calibration_constant=6, active_threshold=0.6, add_global_connections=False):
         # Expand 3d position vector to a 32*32 matrix
+        print('3')
         distance_3d_matrix = np.array([self.positions_3d, ] * len(self.positions_3d))
         # Transpose
         distance_3d_matrix = rearrange(distance_3d_matrix, 'h w d -> w h d')
@@ -88,11 +88,11 @@ class Electrodes:
         distance_3d_matrix = distance_3d_matrix.sum(axis=-1)
         distance_3d_matrix = np.sqrt(distance_3d_matrix)
         # Define local connections
-        distance_3d_matrix[distance_3d_matrix != 0] = (calibration_constant / distance_3d_matrix[distance_3d_matrix != 0])
+        # distance_3d_matrix[distance_3d_matrix != 0] = (calibration_constant / distance_3d_matrix[distance_3d_matrix != 0])
 
-        local_conn_mask = distance_3d_matrix > active_threshold
+        local_conn_mask = distance_3d_matrix < active_threshold
         local_connections = distance_3d_matrix * local_conn_mask
-        # Min max normalize connections and initialize adjacency_matrix
+        # Min max normalize connections and initialice adjacency_matrix
         np.fill_diagonal(local_connections, 0)
         adj_matrix = (local_connections - local_connections.min()) / (local_connections.max() - local_connections.min())
         # Add self-loops
@@ -105,4 +105,9 @@ class Electrodes:
             adj_matrix[global_indices[:, 0], global_indices[:, 1]] = -1
             adj_matrix[global_indices[:, 1], global_indices[:, 0]] = -1
 
-        return adj_matrix  # adj_matrix = local connections + self-loops + (optional) global connections
+        return adj_matrix, 1/adj_matrix  # adj_matrix = local connections + self-loops + (optional) global connections
+
+
+# electrode = Electrodes()
+# a = electrode.get_adjacency_matrix()
+# print(electrode.get_adjacency_matrix())

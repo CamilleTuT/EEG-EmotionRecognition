@@ -1,14 +1,11 @@
-#!/usr/bin/env python
-
 import torch
 import numpy as np
 import torch.nn.functional as F
 from models.GNNLSTM import GNNLSTM
-from DEAPDataset2 import DEAPDataset, train_val_test_split
-from torch_geometric.data import DataLoader
-import matplotlib.pyplot as plt
-import itertools
-
+from DEAPDataset_Spacial import DEAPDataset, train_val_test_split
+from torch_geometric.loader import DataLoader
+# import matplotlib.pyplot as plt
+# import itertools
 np.set_printoptions(precision=2)
 
 
@@ -16,7 +13,7 @@ def map_to_category(value, thresholds):
     """
   value: float, 预测值
   thresholds: list, 阈值列表，用于将预测值映射到类别标签
-  """
+    """
     for i, threshold in enumerate(thresholds):
         if value <= threshold:
             return i
@@ -68,22 +65,18 @@ def test(args):
     p_2 = []
     p_3 = []
     p_4 = []
-    g_1 = []
-    g_2 = []
-    g_3 = []
-    g_4 = []
-    valence_thresholds = [1, 4, 7]  # 低、中、高
-    arousal_thresholds = [1, 4, 7]  # 低、中、高
-    dominance_thresholds = [1, 4, 7]  # 低、中、高
-    liking_thresholds = [1, 4, 7]  # 低、中、高
+    t_1 = []
+    t_2 = []
+    t_3 = []
+    t_4 = []
+    thresholds = [5.5]
+    # DataBatch(x=[32, 7680], edge_index=[2, 396], edge_attr=[396], y=[1, 4], batch=[32], ptr=[2])
     for batch in test_loader:
         batch = batch.to(device)
         predictions = [model(batch, visualize_convolutions=False) for model in models]
-        # print(predictions)
         predictions = torch.stack(predictions, dim=1).squeeze()
-        # print(predictions)
+        # tensor([4.4144, 4.4492, 5.0555, 3.9407], device='cuda:0',  grad_fn= < SqueezeBackward0 >)
         print('-Predictions-')
-        # print(i)
         print(predictions.cpu().detach().numpy(), '\n')
         print('-Ground truth-')
         i = i + 1
@@ -97,42 +90,60 @@ def test(args):
         p_3.append(predictions[2])
         p_4.append(predictions[3])
 
-        g_1.append(batch.y[0][0])
-        g_2.append(batch.y[0][1])
-        g_3.append(batch.y[0][2])
-        g_4.append(batch.y[0][3])
-        # 将预测值转换为类别标签
-    valence_labels = [map_to_category(pred, valence_thresholds) for pred in p_1]
-    arousal_labels = [map_to_category(pred, arousal_thresholds) for pred in p_2]
-    dominance_labels = [map_to_category(pred, dominance_thresholds) for pred in p_3]
-    liking_labels = [map_to_category(pred, liking_thresholds) for pred in p_4]
+        t_1.append(batch.y[0][0])
+        t_2.append(batch.y[0][1])
+        t_3.append(batch.y[0][2])
+        t_4.append(batch.y[0][3])
+    # 将预测值转换为类别标签
+    val_labels_p = [map_to_category(pred, thresholds) for pred in p_1]
+    aro_labels_p = [map_to_category(pred, thresholds) for pred in p_2]
+    dom_labels_p = [map_to_category(pred, thresholds) for pred in p_3]
+    lik_labels_p = [map_to_category(pred, thresholds) for pred in p_4]
 
     # 将真实标签转换为多标签
-    true_multilabels = [[map_to_category(val, valence_thresholds), map_to_category(aro, arousal_thresholds),
-                         map_to_category(dom, dominance_thresholds), map_to_category(lik, liking_thresholds)]
-                        for val, aro, dom, lik in zip(g_1, g_2, g_3, g_4)]
+    val_labels_t = [map_to_category(truth, thresholds) for truth in t_1]
+    aro_labels_t = [map_to_category(truth, thresholds) for truth in t_2]
+    dom_labels_t = [map_to_category(truth, thresholds) for truth in t_3]
+    lik_labels_t = [map_to_category(truth, thresholds) for truth in t_4]
 
-    correct_liking_predictions = 0
-    total_samples = len(g_4)
-    for true_liking, liking_label in zip(g_4, liking_labels):
-        if true_liking <= liking_thresholds[0] and liking_label == 0:
-            correct_liking_predictions += 1
-        elif liking_label == 1:
-            correct_liking_predictions += 1
-        elif true_liking > liking_thresholds[0] and liking_label == 2:
-            correct_liking_predictions += 1
+    true_multilabels = [[map_to_category(val, thresholds), map_to_category(aro, thresholds),
+                         map_to_category(dom, thresholds), map_to_category(lik, thresholds)]
+                        for val, aro, dom, lik in zip(t_1, t_2, t_3, t_4)]
 
-    liking_accuracy = correct_liking_predictions / total_samples
-    print("Liking Accuracy:", liking_accuracy)
+    total_samples = len(t_1)
+
+    # valence
+    # correct_val_predictions = 0
+    # for true_val, predict_val in zip(val_labels_t, val_labels_p):
+    #     if true_val == predict_val:
+    #         correct_val_predictions += 1
+    # val_accuracy = correct_val_predictions / total_samples
+    # print("valence Accuracy:", val_accuracy)
+
+    # arousal
+    correct_aro_predictions = 0
+    for true_val, predict_val in zip(aro_labels_t, aro_labels_p):
+        if true_val == predict_val:
+            correct_aro_predictions += 1
+    aro_accuracy = correct_aro_predictions / total_samples
+    print("arousal Accuracy:", aro_accuracy)
+
+    # valence & arousal
+    # correct_val_aro_predictions = 0
+    # for true_val, predict_val, true_aro, predict_aro in zip(val_labels_t, val_labels_p, aro_labels_t, aro_labels_p):
+    #     if true_val == predict_val and true_aro == predict_aro:
+    #         correct_val_aro_predictions += 1
+    # val_aro_accuracy = correct_val_aro_predictions / total_samples
+    # print("valence & arousal Accuracy:", val_aro_accuracy)
 
     p_1 = [t.cpu().detach().numpy() for t in p_1]
-    g_1 = [t.cpu().detach().numpy() for t in g_1]
+    g_1 = [t.cpu().detach().numpy() for t in t_1]
     p_2 = [t.cpu().detach().numpy() for t in p_2]
-    g_2 = [t.cpu().detach().numpy() for t in g_2]
+    g_2 = [t.cpu().detach().numpy() for t in t_2]
     p_3 = [t.cpu().detach().numpy() for t in p_3]
-    g_3 = [t.cpu().detach().numpy() for t in g_3]
+    g_3 = [t.cpu().detach().numpy() for t in t_3]
     p_4 = [t.cpu().detach().numpy() for t in p_4]
-    g_4 = [t.cpu().detach().numpy() for t in g_4]
+    g_4 = [t.cpu().detach().numpy() for t in t_4]
     # p_1 = p_1.cpu().detach().numpy()
     # g_1 = g_1.cpu().detach().numpy()
 
