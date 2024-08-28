@@ -112,7 +112,7 @@ def train(args):
     for i, target in enumerate(targets):
         print(f'Now training {target} model')
         # model = GNNLSTM(target=target, training=True).to(device)
-        model = GatedGraphConvGRU(59, 4, 128, 2, 0.4, target=target, training=True).to(device)
+        model = GatedGraphConvGRU(59, 4, 128, 1, 0.4, target=target, training=True).to(device)
         optim = torch.optim.Adam(model.parameters(), lr=0.0001)
         total_train_step = 0
         total_val_step = 0
