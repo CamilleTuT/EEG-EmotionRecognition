@@ -16,6 +16,7 @@ class GatedGraphConvGRU(torch.nn.Module):
         self.lin1 = nn.Linear(n_freq_bands*hidden_channels, hidden_channels)
         self.lin2 = nn.Linear(hidden_channels, n_classes)
         self.act = nn.Softmax(dim=-1)
+        self.act1 = nn.Sigmoid()
 
         self.target = {'valence': 0, 'arousal': 1, 'dominance': 2, 'liking': 3}[target]
         self.best_val_loss = float('inf')
@@ -45,5 +46,5 @@ class GatedGraphConvGRU(torch.nn.Module):
         x = x.relu()
         x = F.dropout(x, p=self.dr, training=self.training)
         x = self.lin2(x)
-        # x = self.act(x)
+        x = self.act1(x)
         return x

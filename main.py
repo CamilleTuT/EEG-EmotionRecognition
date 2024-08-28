@@ -9,7 +9,7 @@ parser.add_argument('-pf', '--participant_from', choices=range(1, 32), type=int,
                     help='Which participant data to be used')
 parser.add_argument('-pt', '--participant_to', choices=range(2, 33), type=int, default=32,
                     help='Which participant data to be used')
-parser.add_argument('-bs', '--batch_size', type=int, default=64,
+parser.add_argument('-bs', '--batch_size', type=int, default=128,
                     help='Batch size')
 parser.add_argument('-me', '--max_epoch', type=int, default=300,
                     help='Max epochs for training')

@@ -10,38 +10,48 @@ from torch.utils.tensorboard import SummaryWriter
 
 
 # Define training and eval functions for each epoch (will be shared for all models)
-def train_epoch(targetname, model, loader, optim, criterion, device, writer, total_train_step):
+def train_epoch(target_num, target_name, model, loader, optim, criterion, device, writer, total_train_step):
     model.train()
     model.training = True
     epoch_losses = []
     for batch in tqdm(loader):
-        batch = batch.to(device)
-        target = batch.y.T[model.target].unsqueeze(1)
-        output = model(batch)
-        mse_loss = criterion(output, target)
-        # REGULARIZATION
-        l1_regularization = torch.tensor(0, dtype=torch.float).to(device)
-        # l2_regularization = torch.tensor(0, dtype=torch.float).to(device)
-        for param in model.parameters():
-            l1_regularization += (torch.norm(param, 1) ** 2).float()
-            # l2_regularization += (torch.norm(param, 2)**2).float()
-        loss = mse_loss + 0.02 * l1_regularization
         optim.zero_grad()
+        batch = batch.to(device)
+        target = (batch.y[:, target_num] > 5).float()
+        output = model(batch).squeeze(1)
+        loss = criterion(output, target)
         loss.backward()
         optim.step()
-
         total_train_step += 1
-        if total_train_step % 64 == 0:
-            print("Train Batch Counter: {}, Loss: {}".format(total_train_step, mse_loss.item()))
-            writer.add_scalar(f"Train Loss_{targetname}", mse_loss.item(), total_train_step)
+        writer.add_scalar(f"Train Loss_{target_name}", loss.item(), total_train_step)
 
-        epoch_losses.append(mse_loss.item())
-    epoch_mean_loss = np.array(epoch_losses).mean()
-    model.train_losses.append(epoch_mean_loss)
-    return total_train_step, epoch_mean_loss
+    # for batch in tqdm(loader):
+    #     batch = batch.to(device)
+    #     target = batch.y.T[model.target].unsqueeze(1)
+    #     output = model(batch)
+    #     mse_loss = criterion(output, target)
+    #     # REGULARIZATION
+    #     l1_regularization = torch.tensor(0, dtype=torch.float).to(device)
+    #     # l2_regularization = torch.tensor(0, dtype=torch.float).to(device)
+    #     for param in model.parameters():
+    #         l1_regularization += (torch.norm(param, 1) ** 2).float()
+    #         # l2_regularization += (torch.norm(param, 2)**2).float()
+    #     loss = mse_loss + 0.02 * l1_regularization
+    #     optim.zero_grad()
+    #     loss.backward()
+    #     optim.step()
+    #     total_train_step += target.shape[0]
+    #     if total_train_step % 64 == 0:
+    #         print("Train Batch Counter: {}, Loss: {}".format(total_train_step, mse_loss.item()))
+    #         writer.add_scalar(f"Train Loss_{target_name}", mse_loss.item(), total_train_step)
+    #
+    #     epoch_losses.append(mse_loss.item())
+    # epoch_mean_loss = np.array(epoch_losses).mean()
+    # model.train_losses.append(epoch_mean_loss)
+    return total_train_step
 
 
-def eval_epoch(targetname, model, loader, criterion, device, epoch, writer, total_val_step, model_is_training):
+def eval_epoch(target_num, target_name, model, loader, criterion, device, epoch, writer, total_val_step, model_is_training):
     model.eval()
     model.training = False
     val_count = 0
@@ -51,26 +61,37 @@ def eval_epoch(targetname, model, loader, criterion, device, epoch, writer, tota
     with torch.no_grad():
         for batch in loader:
             batch = batch.to(device)
-            output = model(batch)
-            print(output)
-            target = batch.y.T[model.target].unsqueeze(1)
-            batch_size = target.shape[0]
-            batch_count = 0
+            target = (batch.y[:, target_num] > 5).float()
+            output = model(batch).squeeze(1)
+            # print(output)
             loss = criterion(output, target)
             val_loss += loss.item()
-            total_val_step += 1
-            while batch_count < batch_size:
-                if output[batch_count][0] < 5.5 and target[batch_count][0] < 5.5:
-                    val_acc += 1
-                elif output[batch_count][0] > 5.5 and target[batch_count][0] > 5.5:
-                    val_acc += 1
-                batch_count += 1
-                val_count += 1
+            total_val_step += target.shape[0]
+            val_acc += torch.eq(output > 0.5, target > 0.5).sum().item()
+            val_count += target.shape[0]
+
+        # for batch in loader:
+        #     batch = batch.to(device)
+        #     output = model(batch)
+        #     print(output)
+        #     target = batch.y.T[model.target].unsqueeze(1)
+        #     batch_size = target.shape[0]
+        #     batch_count = 0
+        #     loss = criterion(output, target)
+        #     val_loss += loss.item()
+        #     total_val_step += 1
+        #     while batch_count < batch_size:
+        #         if output[batch_count][0] < 5.5 and target[batch_count][0] < 5.5:
+        #             val_acc += 1
+        #         elif output[batch_count][0] > 5.5 and target[batch_count][0] > 5.5:
+        #             val_acc += 1
+        #         batch_count += 1
+        #         val_count += 1
 
         print("Loss on the validation set: {}".format(val_loss))
         print("Accuracy on the validation set: {}".format(val_acc/val_count))
-        writer.add_scalar(f"Validation_Loss_{targetname}", val_loss, total_val_step)
-        writer.add_scalar(f"Validation_Accuracy_{targetname}", val_acc/val_count, total_val_step)
+        writer.add_scalar(f"Validation_Loss_{target_name}", val_loss, total_val_step)
+        writer.add_scalar(f"Validation_Accuracy_{target_name}", val_acc/val_count, total_val_step)
 
         if model_is_training:
             # Save current best model
@@ -104,7 +125,7 @@ def train(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Device: {device}')
     # Define loss function
-    criterion = torch.nn.MSELoss()
+    criterion = torch.nn.BCELoss()
     # Define model targets. Each target has a model associated to it.
     targets = ['valence', 'arousal', 'dominance', 'liking'][:args.n_targets]
     # Train models one by one as opposed to having an array [] of models. Avoids CUDA out of memory error
@@ -112,20 +133,15 @@ def train(args):
     for i, target in enumerate(targets):
         print(f'Now training {target} model')
         # model = GNNLSTM(target=target, training=True).to(device)
-        model = GatedGraphConvGRU(59, 4, 128, 1, 0.4, target=target, training=True).to(device)
+        model = GatedGraphConvGRU(59, 4, 256, 1, 0.4, target=target, training=True).to(device)
         optim = torch.optim.Adam(model.parameters(), lr=0.0001)
         total_train_step = 0
         total_val_step = 0
         for epoch in range(MAX_EPOCH_N):
             print("------ Epoch {} ------".format(epoch))
-
             # Train epoch for every model
-            total_train_step, t_e_loss = train_epoch(target, model, train_loader, optim, criterion, device, writer, total_train_step)
-
+            total_train_step = train_epoch(i, target, model, train_loader, optim, criterion, device, writer, total_train_step)
             # Validation epoch for every model
-            total_val_step = eval_epoch(target, model, val_loader, criterion, device, epoch, writer, total_val_step, model_is_training=True)
-
-            if t_e_loss == -1:
-                break
+            total_val_step = eval_epoch(i, target, model, val_loader, criterion, device, epoch, writer, total_val_step, model_is_training=True)
 
     writer.close()
