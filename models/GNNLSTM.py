@@ -13,9 +13,8 @@ class GNNLSTM(torch.nn.Module):
 
         self.gconv1 = GraphConv(in_channels=7680, out_channels=5000, aggr='add')
         self.gconv2 = GraphConv(in_channels=5000, out_channels=4000, aggr='add')
-        self.lstm = torch.nn.LSTM(2, 2, bidirectional=True)
-        self.mlp = Sequential(Linear(8000, 2000),
-                              Linear(2000, 1))
+        self.lstm = torch.nn.LSTM(2, 3, 2, bidirectional=True)
+        self.mlp = Sequential(Linear(15000, 1))
         # MODEL CLASS ATTRIBUTES
         self.target = {'valence': 0, 'arousal': 1, 'dominance': 2, 'liking': 3}[target]
         self.best_val_loss = float('inf')
@@ -26,6 +25,7 @@ class GNNLSTM(torch.nn.Module):
 
     def forward(self, batch, visualize_convolutions=False):
         x = batch.x
+        print(x.shape)
         edge_index = batch.edge_index
         edge_attr = batch.edge_attr
         batch = batch.batch
@@ -33,12 +33,12 @@ class GNNLSTM(torch.nn.Module):
         x = self.gconv1(x, edge_index, edge_attr)  # torch.Size([2048, 5000])
         x = F.relu(x)
         x = F.dropout(x, p=0.3, training=self.training)
-        x = self.gconv2(x, edge_index, edge_attr)
-        x = F.relu(x)
-        x = F.dropout(x, p=0.3, training=self.training)  # torch.Size([2048, 4000])
-        x = global_add_pool(x, batch)  # torch.Size([64, 4000])
-        x = rearrange(x, 'b (sl i) -> sl b i', i=2)  # torch.Size([2000, 64, 2])
-        output, (c_n, h_n) = self.lstm(x)  # torch.Size([2000, 64, 4])
-        x = rearrange(output, 'sl b i -> b (sl i)')  # torch.Size([64, 8000])
+        # x = self.gconv2(x, edge_index, edge_attr)
+        # x = F.relu(x)
+        # x = F.dropout(x, p=0.3, training=self.training)  # torch.Size([2048, 4000])
+        x = global_add_pool(x, batch)  # torch.Size([64, 5000])
+        x = rearrange(x, 'b (sl i) -> sl b i', i=2)  # torch.Size([2500, 64, 2])
+        output, (c_n, h_n) = self.lstm(x)  # torch.Size([2500, 64, 6])
+        x = rearrange(output, 'sl b i -> b (sl i)')  # torch.Size([64, 15000])
         x = self.mlp(x)
         return x
