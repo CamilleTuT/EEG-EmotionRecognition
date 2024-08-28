@@ -2,6 +2,7 @@ import torch
 import numpy as np
 from torch_geometric.loader import DataLoader
 from DEAPDataset_Spacial import DEAPDataset, train_val_test_split
+from DEAPDataset_freq import DEAPDatasetEEGFeatures
 from models.GNNLSTM import GNNLSTM
 from models.GatedGraphConvGRU import GatedGraphConvGRU
 from tqdm import tqdm
@@ -9,14 +10,14 @@ from torch.utils.tensorboard import SummaryWriter
 
 
 # Define training and eval functions for each epoch (will be shared for all models)
-def train_epoch(model, loader, optim, criterion, device, writer, total_train_step):
+def train_epoch(targetname, model, loader, optim, criterion, device, writer, total_train_step):
     model.train()
     model.training = True
     epoch_losses = []
     for batch in tqdm(loader):
         batch = batch.to(device)
         target = batch.y.T[model.target].unsqueeze(1)
-        output = model(batch, visualize_convolutions=False)
+        output = model(batch)
         mse_loss = criterion(output, target)
         # REGULARIZATION
         l1_regularization = torch.tensor(0, dtype=torch.float).to(device)
@@ -32,7 +33,7 @@ def train_epoch(model, loader, optim, criterion, device, writer, total_train_ste
         total_train_step += 1
         if total_train_step % 64 == 0:
             print("Train Batch Counter: {}, Loss: {}".format(total_train_step, mse_loss.item()))
-            writer.add_scalar("Train Loss", mse_loss.item(), total_train_step)
+            writer.add_scalar(f"Train Loss_{targetname}", mse_loss.item(), total_train_step)
 
         epoch_losses.append(mse_loss.item())
     epoch_mean_loss = np.array(epoch_losses).mean()
@@ -40,7 +41,7 @@ def train_epoch(model, loader, optim, criterion, device, writer, total_train_ste
     return total_train_step, epoch_mean_loss
 
 
-def eval_epoch(model, loader, criterion, device, epoch, writer, total_val_step, model_is_training):
+def eval_epoch(targetname, model, loader, criterion, device, epoch, writer, total_val_step, model_is_training):
     model.eval()
     model.training = False
     val_count = 0
@@ -68,8 +69,8 @@ def eval_epoch(model, loader, criterion, device, epoch, writer, total_val_step, 
 
         print("Loss on the validation set: {}".format(val_loss))
         print("Accuracy on the validation set: {}".format(val_acc/val_count))
-        writer.add_scalar("Validation_Loss", val_loss, total_val_step)
-        writer.add_scalar("Validation_Accuracy", val_acc/val_count, total_val_step)
+        writer.add_scalar(f"Validation_Loss_{targetname}", val_loss, total_val_step)
+        writer.add_scalar(f"Validation_Accuracy_{targetname}", val_acc/val_count, total_val_step)
 
         if model_is_training:
             # Save current best model
@@ -85,11 +86,12 @@ def train(args):
     RAW_DIR = '/DEAP/data_preprocessed_matlab'
     PROCESSED_DIR = '/202083270302ywh/GCN-LSTM-deap/ProcessedData/Wavelet'
     # Initialize dataset
-    dataset = DEAPDataset(root=ROOT_DIR,
-                          raw_dir=RAW_DIR,
-                          processed_dir=PROCESSED_DIR,
-                          participant_from=args.participant_from,
-                          participant_to=args.participant_to)
+    # dataset = DEAPDataset(root=ROOT_DIR,
+    #                       raw_dir=RAW_DIR,
+    #                       processed_dir=PROCESSED_DIR,
+    #                       participant_from=args.participant_from,
+    #                       participant_to=args.participant_to)
+    dataset = DEAPDatasetEEGFeatures(root=ROOT_DIR, raw_dir=RAW_DIR, processed_dir=PROCESSED_DIR, feature='wav')
     # print(dataset[0].x.shape) torch.Size([32, 7680])
     # print(dataset[0].y.shape) torch.Size([1, 4])
     # print(dataset.x.shape) torch.Size([40960, 7680])
@@ -109,8 +111,8 @@ def train(args):
     MAX_EPOCH_N = args.max_epoch
     for i, target in enumerate(targets):
         print(f'Now training {target} model')
-        model = GNNLSTM(target=target, training=True).to(device)
-        model = GatedGraphConvGRU(59, 5, 128, 2, 0.4, target=target, training=True).to(device)
+        # model = GNNLSTM(target=target, training=True).to(device)
+        model = GatedGraphConvGRU(59, 4, 128, 2, 0.4, target=target, training=True).to(device)
         optim = torch.optim.Adam(model.parameters(), lr=0.0001)
         total_train_step = 0
         total_val_step = 0
@@ -118,10 +120,10 @@ def train(args):
             print("------ Epoch {} ------".format(epoch))
 
             # Train epoch for every model
-            total_train_step, t_e_loss = train_epoch(model, train_loader, optim, criterion, device, writer, total_train_step)
+            total_train_step, t_e_loss = train_epoch(target, model, train_loader, optim, criterion, device, writer, total_train_step)
 
             # Validation epoch for every model
-            total_val_step = eval_epoch(model, val_loader, criterion, device, epoch, writer, total_val_step, model_is_training=True)
+            total_val_step = eval_epoch(target, model, val_loader, criterion, device, epoch, writer, total_val_step, model_is_training=True)
 
             if t_e_loss == -1:
                 break

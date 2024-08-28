@@ -105,7 +105,7 @@ class Electrodes:
             adj_matrix[global_indices[:, 0], global_indices[:, 1]] = -1
             adj_matrix[global_indices[:, 1], global_indices[:, 0]] = -1
 
-        return adj_matrix, 1/adj_matrix  # adj_matrix = local connections + self-loops + (optional) global connections
+        return adj_matrix # adj_matrix = local connections + self-loops + (optional) global connections
 
 
 # electrode = Electrodes()
