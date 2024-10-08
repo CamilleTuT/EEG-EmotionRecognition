@@ -13,7 +13,7 @@ parser.add_argument('-bs', '--batch_size', type=int, default=128,
                     help='Batch size')
 parser.add_argument('-me', '--max_epoch', type=int, default=150,
                     help='Max epochs for training')
-parser.add_argument('-dst', '--dont_shuffle_train', default=True, action='store_true')
+parser.add_argument('-st', '--shuffle_train', default=True, action='store_true')
 parser.add_argument('--test', default=False, action='store_true')
 
 args = parser.parse_args()

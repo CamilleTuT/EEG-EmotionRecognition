@@ -78,7 +78,6 @@ class Electrodes:
     # Calibration constant should keep 20% of the links acording to the paper
     def get_adjacency_matrix(self, calibration_constant=6, active_threshold=0.6, add_global_connections=False):
         # Expand 3d position vector to a 32*32 matrix
-        print('3')
         distance_3d_matrix = np.array([self.positions_3d, ] * len(self.positions_3d))
         # Transpose
         distance_3d_matrix = rearrange(distance_3d_matrix, 'h w d -> w h d')
@@ -108,6 +107,6 @@ class Electrodes:
         return adj_matrix # adj_matrix = local connections + self-loops + (optional) global connections
 
 
-# electrode = Electrodes()
-# a = electrode.get_adjacency_matrix()
-# print(electrode.get_adjacency_matrix())
+electrode = Electrodes()
+a = electrode.get_adjacency_matrix()
+print(electrode.get_adjacency_matrix())

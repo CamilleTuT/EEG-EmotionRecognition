@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 from torch_geometric.nn import GatedGraphConv
+import torch.nn.utils.weight_norm as weight_norm
 
 
 class GatedGraphConvGRU(torch.nn.Module):
@@ -13,7 +14,7 @@ class GatedGraphConvGRU(torch.nn.Module):
         self.hidden_channels = hidden_channels
         self.grus = nn.ModuleList([nn.GRU(32, hidden_channels, 2, batch_first=True) for _ in range(n_freq_bands)])
         self.gconv = GatedGraphConv(hidden_channels if hidden_channels > in_channels else in_channels, 2)
-        self.lin1 = nn.Linear(n_freq_bands*hidden_channels, hidden_channels)
+        self.lin1 = weight_norm(nn.Linear(n_freq_bands*hidden_channels, hidden_channels))
         self.lin2 = nn.Linear(hidden_channels, n_classes)
         self.act = nn.Softmax(dim=-1)
         self.act1 = nn.Sigmoid()
@@ -43,7 +44,7 @@ class GatedGraphConvGRU(torch.nn.Module):
         x = F.dropout(x, p=self.dr/2, training=self.training)
 
         x = self.lin1(x)
-        x = x.relu()
+        x = x.selu()
         x = F.dropout(x, p=self.dr, training=self.training)
         x = self.lin2(x)
         x = self.act1(x)

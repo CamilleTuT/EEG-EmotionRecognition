@@ -1,16 +1,17 @@
 import torch
+import random
 import numpy as np
-from torch_geometric.loader import DataLoader
-from DEAPDataset_Spacial import DEAPDataset, train_val_test_split
-from DEAPDataset_freq import DEAPDatasetEEGFeatures
-from models.GNNLSTM import GNNLSTM
-from models.GatedGraphConvGRU import GatedGraphConvGRU
 from tqdm import tqdm
+from torch.utils.data import Subset
+from sklearn.model_selection import KFold
+from torch_geometric.loader import DataLoader
+from DEAPDataset_freq import DEAPDatasetEEGFeatures, train_val_test_split
+from models.GatedGraphConvGRU import GatedGraphConvGRU
 from torch.utils.tensorboard import SummaryWriter
 
 
 # Define training and eval functions for each epoch (will be shared for all models)
-def train_epoch(target_num, target_name, model, loader, optim, criterion, device, writer, total_train_step):
+def train_epoch(kf_count, target_num, target_name, model, loader, optim, criterion, device, writer, total_train_step):
     model.train()
     model.training = True
     epoch_losses = []
@@ -23,8 +24,8 @@ def train_epoch(target_num, target_name, model, loader, optim, criterion, device
         loss.backward()
         optim.step()
         total_train_step += 1
-        writer.add_scalar(f"Train Loss_{target_name}", loss.item(), total_train_step)
-
+        writer.add_scalar(f"Train Loss_{target_name}_{kf_count}", loss.item(), total_train_step)
+    return total_train_step
     # for batch in tqdm(loader):
     #     batch = batch.to(device)
     #     target = batch.y.T[model.target].unsqueeze(1)
@@ -48,10 +49,9 @@ def train_epoch(target_num, target_name, model, loader, optim, criterion, device
     #     epoch_losses.append(mse_loss.item())
     # epoch_mean_loss = np.array(epoch_losses).mean()
     # model.train_losses.append(epoch_mean_loss)
-    return total_train_step
 
 
-def eval_epoch(target_num, target_name, model, loader, criterion, device, epoch, writer, total_val_step, model_is_training):
+def eval_epoch(kf_count, target_num, target_name, model, loader, criterion, device, epoch, writer, total_val_step, model_is_training):
     model.eval()
     model.training = False
     val_count = 0
@@ -66,7 +66,7 @@ def eval_epoch(target_num, target_name, model, loader, criterion, device, epoch,
             # print(output)
             loss = criterion(output, target)
             val_loss += loss.item()
-            total_val_step += target.shape[0]
+            total_val_step += 1
             val_acc += torch.eq(output > 0.5, target > 0.5).sum().item()
             val_count += target.shape[0]
 
@@ -90,58 +90,77 @@ def eval_epoch(target_num, target_name, model, loader, criterion, device, epoch,
 
         print("Loss on the validation set: {}".format(val_loss))
         print("Accuracy on the validation set: {}".format(val_acc/val_count))
-        writer.add_scalar(f"Validation_Loss_{target_name}", val_loss, total_val_step)
-        writer.add_scalar(f"Validation_Accuracy_{target_name}", val_acc/val_count, total_val_step)
+        writer.add_scalar(f"Validation_Loss_{target_name}_{kf_count}", val_loss, total_val_step)
+        writer.add_scalar(f"Validation_Accuracy_{target_name}_{kf_count}", val_acc/val_count, total_val_step)
+        # if model_is_training:
+        #     # Save current best model
+        #     if val_loss < model.best_val_loss:
+        #         model.best_val_loss = val_loss
+        #         model.best_epoch = epoch
+        #         torch.save(model.state_dict(), f'./best_params_{model.target}.pth')
+    return val_acc/val_count, total_val_step
 
-        if model_is_training:
-            # Save current best model
-            if val_loss < model.best_val_loss:
-                model.best_val_loss = val_loss
-                model.best_epoch = epoch
-                torch.save(model.state_dict(), f'./best_params_{model.target}.pth')
-    return total_val_step
 
 def train(args):
     writer = SummaryWriter("./logs")
     ROOT_DIR = 'D:/Myworks/Learn/Research/EEG'
     RAW_DIR = '/DEAP/data_preprocessed_matlab'
-    PROCESSED_DIR = '/202083270302ywh/GCN-LSTM-deap/ProcessedData/Wavelet'
+    PROCESSED_DIR = '/Mycode/EEG/ProcessedData/DE'
     # Initialize dataset
     # dataset = DEAPDataset(root=ROOT_DIR,
     #                       raw_dir=RAW_DIR,
     #                       processed_dir=PROCESSED_DIR,
     #                       participant_from=args.participant_from,
     #                       participant_to=args.participant_to)
-    dataset = DEAPDatasetEEGFeatures(root=ROOT_DIR, raw_dir=RAW_DIR, processed_dir=PROCESSED_DIR, feature='wav')
-    # print(dataset[0].x.shape) torch.Size([32, 7680])
-    # print(dataset[0].y.shape) torch.Size([1, 4])
-    # print(dataset.x.shape) torch.Size([40960, 7680])
-    # print(dataset.y.shape) torch.Size([1280, 4])
-    # 30 for training 5 for validation 5 for testing
-    train_set, val_set, _ = train_val_test_split(dataset)
-    BATCH_SIZE = args.batch_size
-    train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=not args.dont_shuffle_train)
-    val_loader = DataLoader(val_set, batch_size=5)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Device: {device}')
     # Define loss function
     criterion = torch.nn.BCELoss()
     # Define model targets. Each target has a model associated to it.
     targets = ['valence', 'arousal', 'dominance', 'liking'][:args.n_targets]
-    # Train models one by one as opposed to having an array [] of models. Avoids CUDA out of memory error
+    BATCH_SIZE = args.batch_size
     MAX_EPOCH_N = args.max_epoch
-    for i, target in enumerate(targets):
-        print(f'Now training {target} model')
-        # model = GNNLSTM(target=target, training=True).to(device)
-        model = GatedGraphConvGRU(59, 4, 512, 1, 0.3, target=target, training=True).to(device)
-        optim = torch.optim.Adam(model.parameters(), lr=0.0001)
+    dataset = DEAPDatasetEEGFeatures(root=ROOT_DIR, raw_dir=RAW_DIR, processed_dir=PROCESSED_DIR, feature='de')
+    # for participant_id in range(1, 33):
+    participant_id = 2
+    dataset = dataset[40*(participant_id-1):40*participant_id]
+    dataset = dataset.shuffle()
+    average_accuracy = 0
+    target_num = 0
+    n_splits = 8
+    kf_count = 0
+    kf = KFold(n_splits)
+    for train_index, val_index in kf.split(dataset):
+        print('Now training {} fold'.format(kf_count))
+        train_set = dataset.index_select(torch.LongTensor(train_index))
+        val_set = dataset.index_select(torch.LongTensor(val_index))
+        train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=args.shuffle_train)
+        val_loader = DataLoader(val_set, batch_size=5)
+
+        model = GatedGraphConvGRU(60, 5, 512, 1, 0.5, targets[target_num], training=True).to(device)
+        optim = torch.optim.Adam(model.parameters(), lr=0.000005)
         total_train_step = 0
         total_val_step = 0
         for epoch in range(MAX_EPOCH_N):
             print("------ Epoch {} ------".format(epoch))
             # Train epoch for every model
-            total_train_step = train_epoch(i, target, model, train_loader, optim, criterion, device, writer, total_train_step)
+            total_train_step = train_epoch(kf_count, target_num, targets[target_num], model, train_loader, optim, criterion, device, writer, total_train_step)
             # Validation epoch for every model
-            total_val_step = eval_epoch(i, target, model, val_loader, criterion, device, epoch, writer, total_val_step, model_is_training=True)
-
+            epoch_accuracy, total_val_step = eval_epoch(kf_count, target_num, targets[target_num], model, val_loader, criterion, device, epoch, writer, total_val_step, model_is_training=True)
+            average_accuracy = average_accuracy + epoch_accuracy
+        kf_count += 1
+        # for i, target in enumerate(targets):
+        #     print(f'Now training {target} model')
+        #     model = GatedGraphConvGRU(60, 5, 512, 1, 0.3, target=target, training=True).to(device)
+        #     optim = torch.optim.Adam(model.parameters(), lr=0.0001)
+        #     total_train_step = 0
+        #     total_val_step = 0
+        #     for epoch in range(MAX_EPOCH_N):
+        #         print("------ Epoch {} ------".format(epoch))
+        #         # Train epoch for every model
+        #         total_train_step = train_epoch(i, target, model, train_loader, optim, criterion, device, writer, total_train_step)
+        #         # Validation epoch for every model
+        #         total_val_step = eval_epoch(i, target, model, val_loader, criterion, device, epoch, writer, total_val_step, model_is_training=True)
+    average_accuracy /= MAX_EPOCH_N * n_splits
+    print('ACCURACY:{}'.format(average_accuracy))
     writer.close()

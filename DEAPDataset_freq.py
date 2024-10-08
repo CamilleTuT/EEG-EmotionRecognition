@@ -2,6 +2,7 @@ import os
 import torch
 import skimage
 import pywt
+import random
 import scipy.io
 import scipy.signal
 import torch.nn as nn
@@ -13,14 +14,29 @@ from einops import reduce, rearrange, repeat
 from npeet import entropy_estimators as ee
 from torch.optim.lr_scheduler import StepLR
 from scipy.fft import rfft, rfftfreq, ifft
-from einops import rearrange
 from torch_geometric.data import InMemoryDataset, Data, DataLoader
 from Electrodes import Electrodes
 from tqdm import tqdm
+import itertools
+
+
+def train_val_test_split(dataset):
+    train_mask = np.append(np.repeat(1, 30), np.repeat(0, 10))
+    train_mask = np.tile(train_mask, int(len(dataset) / 40))
+    val_mask = np.append(np.append(np.repeat(0, 30), np.repeat(1, 5)), np.repeat(0, 5))
+    val_mask = np.tile(val_mask, int(len(dataset) / 40))
+    test_mask = np.append(np.repeat(0, 35), np.repeat(1, 5))
+    test_mask = np.tile(test_mask, int(len(dataset) / 40))
+
+    train_set = [c for c in itertools.compress(dataset, train_mask)]
+    val_set = [c for c in itertools.compress(dataset, val_mask)]
+    test_set = [c for c in itertools.compress(dataset, test_mask)]
+
+    return train_set, val_set, test_set
 
 
 def calculate_de(window):
-    return ee.entropy(window.reshape(-1, 1), k=2)
+    return ee.entropy(window.reshape(-1, 1))
 
 
 # Input: Video with shape (32,7680)
@@ -33,34 +49,39 @@ def process_video(video, feature='psd'):
     fft_freq = np.fft.rfftfreq(video.shape[-1], 1.0 / samplingFrequency)
     # Delta, Theta, Alpha, Beta, Gamma
     bands = [(0, 4), (4, 8), (8, 12), (12, 30), (30, 45)]
-
     band_mask = np.array([np.logical_or(fft_freq < f, fft_freq > t) for f, t in bands])
     band_mask = repeat(band_mask, 'a b -> a c b', c=32)
     band_data = np.array(fft_vals)
     band_data = repeat(band_data, 'a b -> c a b', c=5)
-
     band_data[band_mask] = 0
-
     band_data = np.fft.irfft(band_data)
-
     windows = skimage.util.view_as_windows(band_data, (5, 32, 128), step=128).squeeze()
     # (5, 32, 60, 128)
-    windows = rearrange(windows, 'a b c d -> b c a d')
+    if windows.ndim == 4:  # video signal
+        windows = rearrange(windows, 'a b c d -> b c a d')
 
-    if feature == 'psd':
-        features = scipy.signal.periodogram(windows)[1]
-        features = np.mean(features, axis=-1)
-    elif feature == 'de':
-        features = np.apply_along_axis(calculate_de, -1, windows)
-
-    features = rearrange(features, 'a b c -> (a b) c')
-    features = torch.FloatTensor(features)
+        if feature == 'psd':
+            features = scipy.signal.periodogram(windows)[1]
+            features = np.mean(features, axis=-1)
+        elif feature == 'de':
+            features = np.apply_along_axis(calculate_de, -1, windows)
+        features = rearrange(features, 'a b c -> (a b) c')
+        features = torch.FloatTensor(features)
+    else:  # baseline signal
+        if feature == 'psd':
+            features = scipy.signal.periodogram(windows)[1]
+            features = np.mean(features, axis=-1)
+        elif feature == 'de':
+            features = np.apply_along_axis(calculate_de, -1, windows)
+            features = np.expand_dims(features, axis=2)
+        features = rearrange(features, 'a b c -> (a b) c').squeeze()
+        features = torch.FloatTensor(features)
 
     return features
 
 
 def plot_video(signal_data):
-    electrodes = Electrodes(expand_3d=False)
+    electrodes = Electrodes()
     fig, axs = plt.subplots(32, sharex=True, figsize=(20, 50))
     fig.tight_layout()
     video = signal_data[0]
@@ -77,12 +98,12 @@ def plot_video(signal_data):
 
 def remove_baseline_mean(signal_data):
     # Take first three senconds of data
-    signal_baseline = np.array(signal_data[:,:,:128*3]).reshape(40,32,128,-1)
+    signal_baseline = np.array(signal_data[:, :, :128*3]).reshape(40, 32, 128, -1)
     # Mean of three senconds of baseline will be deducted from all windows
-    signal_noise = np.mean(signal_baseline,axis=-1)
+    signal_noise = np.mean(signal_baseline, axis=-1)
     # Expand mask
-    signal_noise = repeat(signal_noise,'a b c -> a b (d c)',d=60)
-    return signal_data[:,:,128*3:] - signal_noise
+    signal_noise = repeat(signal_noise, 'a b c -> a b (d c)', d=60)
+    return signal_data[:, :, 128*3:] - signal_noise
 
 
 def process_video_wavelet(video, feature='energy', time_domain=False):
@@ -95,8 +116,7 @@ def process_video_wavelet(video, feature='energy', time_domain=False):
         else:
             cA, cD = pywt.dwt(cA, 'db4')
 
-            cA_windows = skimage.util.view_as_windows(cA, (32, band_widths[i - 1] * 2),
-                                                      step=band_widths[i - 1]).squeeze()
+            cA_windows = skimage.util.view_as_windows(cA, (32, band_widths[i - 1] * 2), step=band_widths[i - 1]).squeeze()
             cA_windows = np.transpose(cA_windows[:59, :, :], (1, 0, 2))
             if feature == 'energy':
                 cA_windows = np.square(cA_windows)
@@ -172,8 +192,7 @@ class DEAPDatasetEEGFeatures(InMemoryDataset):
         mask = np.ma.masked_not_equal(edge_attr, 0).mask
         edge_attr, source_nodes, target_nodes = edge_attr[mask], source_nodes[mask], target_nodes[mask]
 
-        edge_attr, edge_index = torch.FloatTensor(edge_attr), torch.tensor([source_nodes, target_nodes],
-                                                                           dtype=torch.long)
+        edge_attr, edge_index = torch.FloatTensor(edge_attr), torch.tensor([source_nodes, target_nodes], dtype=torch.long)
 
         # Expand edge_index and edge_attr to match windows
         e_edge_index = edge_index.clone()
@@ -193,20 +212,24 @@ class DEAPDatasetEEGFeatures(InMemoryDataset):
             pbar.set_description(raw_name)
             # Load raw file as np array
             participant_data = scipy.io.loadmat(f'{self.raw_dir}/{raw_name}')
-            signal_data = torch.FloatTensor(remove_baseline_mean(participant_data['data'][:, :32, :]))
-            # signal_data = torch.FloatTensor()
-            processed = []
+            baseline_data = torch.FloatTensor(participant_data['data'][:, :32, 128*2:128*3])
+            # signal_data = torch.FloatTensor(remove_baseline_mean(participant_data['data'][:, :32, :]))
+            signal_data = torch.FloatTensor(participant_data['data'][:, :32, 128*3:])
             for i, video in enumerate(signal_data[:self.n_videos, :, :]):
                 if self.feature == 'wav':
                     node_features = process_video_wavelet(video)
                 else:
-                    node_features = process_video(video, feature=self.feature)
-                data = Data(x=torch.FloatTensor(node_features), edge_attr=e_edge_attr, edge_index=e_edge_index,
-                            y=torch.FloatTensor([participant_data['labels'][i]])) if self.include_edge_attr else Data(
-                    x=torch.FloatTensor(node_features), edge_index=e_edge_index,
-                    y=torch.FloatTensor([participant_data['labels'][i]]))
-                data_list.append(data)
+                    node_features = process_video(video, feature=self.feature)  # 160 * 60
+                    baseline_feature = process_video(baseline_data[i, :, :], feature=self.feature)  # 160
+                    baseline_feature = repeat(baseline_feature, 'a -> a b', b=60)
+                    node_features = node_features - baseline_feature
+                    node_features = F.normalize(node_features)
 
+                if self.include_edge_attr:
+                    data = Data(x=torch.FloatTensor(node_features), edge_attr=e_edge_attr, edge_index=e_edge_index, y=torch.FloatTensor([participant_data['labels'][i]]))
+                else:
+                    data = Data(x=torch.FloatTensor(node_features), edge_index=e_edge_index, y=torch.FloatTensor([participant_data['labels'][i]]))
+
+                data_list.append(data)
         data, slices = self.collate(data_list)
         torch.save((data, slices), self.processed_paths[0])
-
